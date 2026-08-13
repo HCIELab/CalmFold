@@ -1,7 +1,9 @@
 # CalmFold
 UIST 2026 Student Innovation Contest
 
-EmotiBit EDA-Triggered Two-Motor System
+## EmotiBit EDA-Triggered Two-Motor System
+
+**Skip to step 5 if system is already setup**
 
 This project uses live **EmotiBit EDA data** to detect an increase in physiological arousal and activate **two DC micromotors** simultaneously through a **DRV8833 dual motor driver**.
 
@@ -207,18 +209,6 @@ When triggered, Python sends `M` to the EmotiBit over UDP, and both motors activ
 
 The `15 s` cooldown prevents repeated activations from the same sustained EDA increase.
 
-## Stopping
-
-Press:
-
-```text
-Control-C
-```
-
-to stop the Python program.
-
-Before exiting, the script sends `S` to stop both motors.
-
 ## System Flow
 
 ```text
@@ -252,8 +242,6 @@ Motor 1    Motor 2
 ## Troubleshooting
 
 **Python receives no EDA:** make sure the EmotiBit is streaming and **`OSC Data` is checked** in EmotiBit Oscilloscope.
-
-**EDA signal is unstable or jumps during calibration:** make sure the EDA electrodes are **flush against the skin**, avoid moving the sensor, and restart the Python script to recalibrate after fixing the contact.
 
 **EDA is streaming but motors do not run:** verify `MOTOR_IP` matches the IP printed by the EmotiBit, both devices are on the same Wi-Fi network, and both the firmware and Python script use UDP port `4210`.
 
