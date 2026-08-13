@@ -1,0 +1,264 @@
+#include <Arduino.h>
+#include "EmotiBit.h"
+#include <WiFi.h>
+#include <WiFiUdp.h>
+
+#define SerialUSB SERIAL_PORT_USBVIRTUAL
+
+const uint32_t SERIAL_BAUD = 2000000;
+
+
+// ---------------------------------------------------------
+// Motor settings
+// ---------------------------------------------------------
+
+const int MOTOR_IN1 = 16;
+const int MOTOR_IN2 = 17;
+
+// Motor runs for one second after receiving "M".
+const unsigned long MOTOR_DURATION_MS = 1000;
+
+bool motorRunning = false;
+unsigned long motorStartTime = 0;
+
+
+// ---------------------------------------------------------
+// Wi-Fi motor-command settings
+// ---------------------------------------------------------
+
+WiFiUDP motorUdp;
+
+// Python will send motor commands to this UDP port.
+const uint16_t MOTOR_UDP_PORT = 4210;
+
+// Tracks whether the UDP listener has started.
+bool motorUdpStarted = false;
+
+
+// ---------------------------------------------------------
+// Existing EmotiBit objects
+// ---------------------------------------------------------
+
+EmotiBit emotibit;
+
+const size_t dataSize = EmotiBit::MAX_DATA_BUFFER_SIZE;
+float data[dataSize];
+
+
+// ---------------------------------------------------------
+// Existing button callbacks
+// ---------------------------------------------------------
+
+void onShortButtonPress()
+{
+    // Toggle Wi-Fi on and off.
+    if (emotibit.getPowerMode() == EmotiBit::PowerMode::NORMAL_POWER)
+    {
+        emotibit.setPowerMode(EmotiBit::PowerMode::WIRELESS_OFF);
+        Serial.println("PowerMode::WIRELESS_OFF");
+    }
+    else
+    {
+        emotibit.setPowerMode(EmotiBit::PowerMode::NORMAL_POWER);
+        Serial.println("PowerMode::NORMAL_POWER");
+    }
+}
+
+
+void onLongButtonPress()
+{
+    emotibit.sleep();
+}
+
+
+// ---------------------------------------------------------
+// Motor helper functions
+// ---------------------------------------------------------
+
+void stopMotor()
+{
+    digitalWrite(MOTOR_IN1, LOW);
+    digitalWrite(MOTOR_IN2, LOW);
+
+    motorRunning = false;
+}
+
+
+void startMotor()
+{
+    // One direction.
+    digitalWrite(MOTOR_IN1, HIGH);
+    digitalWrite(MOTOR_IN2, LOW);
+
+    motorRunning = true;
+    motorStartTime = millis();
+
+    Serial.println("Motor started");
+}
+
+
+// ---------------------------------------------------------
+// Start the UDP listener once Wi-Fi is connected
+// ---------------------------------------------------------
+
+void startMotorUdpIfReady()
+{
+    if (motorUdpStarted)
+    {
+        // If Wi-Fi disconnects, mark the listener inactive.
+        if (WiFi.status() != WL_CONNECTED)
+        {
+            motorUdp.stop();
+            motorUdpStarted = false;
+
+            Serial.println("Motor UDP listener stopped: Wi-Fi disconnected");
+        }
+
+        return;
+    }
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        if (motorUdp.begin(MOTOR_UDP_PORT))
+        {
+            motorUdpStarted = true;
+
+            Serial.print("Motor UDP listener started at ");
+            Serial.print(WiFi.localIP());
+            Serial.print(":");
+            Serial.println(MOTOR_UDP_PORT);
+        }
+        else
+        {
+            Serial.println("Could not start motor UDP listener");
+        }
+    }
+}
+
+
+// ---------------------------------------------------------
+// Read Wi-Fi commands and update motor timing
+// ---------------------------------------------------------
+
+void updateMotorUdp()
+{
+    startMotorUdpIfReady();
+
+    if (motorUdpStarted)
+    {
+        int packetSize = motorUdp.parsePacket();
+
+        if (packetSize > 0)
+        {
+            char commandBuffer[8];
+
+            int bytesRead = motorUdp.read(
+                commandBuffer,
+                sizeof(commandBuffer) - 1
+            );
+
+            if (bytesRead > 0)
+            {
+                commandBuffer[bytesRead] = '\0';
+
+                char command = commandBuffer[0];
+
+                if (command == 'M')
+                {
+                    startMotor();
+                }
+                else if (command == 'S')
+                {
+                    stopMotor();
+                    Serial.println("Motor stopped by Wi-Fi command");
+                }
+            }
+        }
+    }
+
+    // Automatically stop after one second.
+    if (
+        motorRunning &&
+        millis() - motorStartTime >= MOTOR_DURATION_MS
+    )
+    {
+        stopMotor();
+        Serial.println("Motor automatically stopped");
+    }
+}
+
+
+// ---------------------------------------------------------
+// Setup
+// ---------------------------------------------------------
+
+void setup()
+{
+    Serial.begin(SERIAL_BAUD);
+    Serial.println("Serial started");
+
+    delay(2000);
+
+    // Configure the DRV8833 motor-control pins.
+    pinMode(MOTOR_IN1, OUTPUT);
+    pinMode(MOTOR_IN2, OUTPUT);
+
+    // Always begin with the motor stopped.
+    stopMotor();
+
+    // Capture the calling .ino filename for firmware information.
+    String inoFilename = __FILE__;
+    inoFilename.replace("/", "\\");
+
+    if (inoFilename.lastIndexOf("\\") != -1)
+    {
+        inoFilename = inoFilename.substring(
+            inoFilename.lastIndexOf("\\") + 1,
+            inoFilename.indexOf(".")
+        );
+    }
+
+    // Start normal EmotiBit operation.
+    emotibit.setup(inoFilename);
+
+    emotibit.attachShortButtonPress(&onShortButtonPress);
+    emotibit.attachLongButtonPress(&onLongButtonPress);
+}
+
+
+// ---------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------
+
+void loop()
+{
+    // Keep normal EmotiBit sensing and Wi-Fi operation running.
+    emotibit.update();
+
+    // Check for wireless motor commands.
+    updateMotorUdp();
+
+    // Preserve the stock example read operation.
+    size_t dataAvailable = emotibit.readData(
+        EmotiBit::DataType::PPG_GREEN,
+        &data[0],
+        dataSize
+    );
+
+    if (dataAvailable > 0)
+    {
+        bool printData = false;
+
+        if (printData)
+        {
+            for (
+                size_t i = 0;
+                i < dataAvailable && i < dataSize;
+                i++
+            )
+            {
+                Serial.println(data[i]);
+            }
+        }
+    }
+}
